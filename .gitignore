@@ -53,3 +53,15 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# STM32CubeIDE generated build output
+Debug/
+Release/
+*.o
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.cyclo
+*.su
