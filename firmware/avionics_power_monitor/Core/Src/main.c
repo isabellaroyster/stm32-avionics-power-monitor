@@ -90,7 +90,14 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
+  uint8_t startup_message[] = "Avionics monitor started\r\n";
 
+  HAL_UART_Transmit(
+      &huart2,
+      startup_message,
+      sizeof(startup_message) - 1U,
+      HAL_MAX_DELAY
+  );
   /* USER CODE END 2 */
 
   /* Infinite loop */
