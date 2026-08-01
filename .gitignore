@@ -65,3 +65,6 @@ Release/
 *.list
 *.cyclo
 *.su
+
+# Local STM32CubeIDE launch configurations
+*.launch
