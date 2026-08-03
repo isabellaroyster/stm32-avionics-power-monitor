@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -98,6 +98,9 @@ int main(void)
       sizeof(startup_message) - 1U,
       HAL_MAX_DELAY
   );
+
+  char telemetry_message[64];
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -107,8 +110,21 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	HAL_GPIO_TogglePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin);
-	HAL_Delay(500);
+	  int message_length = snprintf(
+	      telemetry_message,
+	      sizeof(telemetry_message),
+	      "TIME_MS=%lu\r\n",
+	      (unsigned long)HAL_GetTick()
+	  );
+
+	  HAL_UART_Transmit(
+	      &huart2,
+	      (uint8_t *)telemetry_message,
+	      (uint16_t)message_length,
+	      HAL_MAX_DELAY
+	  );
+
+	  HAL_Delay(1000);
   }
   /* USER CODE END 3 */
 }
