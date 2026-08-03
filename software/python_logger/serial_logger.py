@@ -2,8 +2,9 @@
 STM32 UART CSV Logger
 
 Reads telemetry from the NUCLEO-G071RB over a Windows COM port.
+
 Expected telemetry format:
-    TIME_MS=12345
+    TIME_MS=12345,STATUS=OK
 """
 
 from __future__ import annotations
@@ -17,18 +18,23 @@ from pathlib import Path
 import serial
 from serial import SerialException
 
+
 PORT = "COM3"
 BAUD_RATE = 115200
 TIMEOUT_SECONDS = 1
 
-TIME_PATTERN = re.compile(r"^TIME_MS=(\d+)$")
+TELEMETRY_PATTERN = re.compile(
+    r"^TIME_MS=(\d+),STATUS=([A-Z_]+)$"
+)
 
 
 def main() -> int:
     logs_directory = Path(__file__).resolve().parent / "logs"
     logs_directory.mkdir(exist_ok=True)
 
-    filename = datetime.now().strftime("uptime_log_%Y-%m-%d_%H-%M-%S.csv")
+    filename = datetime.now().strftime(
+        "uptime_log_%Y-%m-%d_%H-%M-%S.csv"
+    )
     csv_path = logs_directory / filename
 
     print(f"Opening {PORT} at {BAUD_RATE} baud...")
@@ -36,43 +42,71 @@ def main() -> int:
     print("Press Ctrl+C to stop logging.\n")
 
     try:
-        with serial.Serial(PORT, BAUD_RATE, timeout=TIMEOUT_SECONDS) as connection:
-            with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
+        with serial.Serial(
+            PORT,
+            BAUD_RATE,
+            timeout=TIMEOUT_SECONDS
+        ) as connection:
+            with csv_path.open(
+                "w",
+                newline="",
+                encoding="utf-8"
+            ) as csv_file:
                 writer = csv.writer(csv_file)
-                writer.writerow(["computer_time", "time_ms"])
+                writer.writerow(
+                    ["computer_time", "time_ms", "status"]
+                )
 
-                print(f"Connected. Saving data to:\n{csv_path}\n")
+                print(
+                    f"Connected. Saving data to:\n{csv_path}\n"
+                )
 
                 while True:
                     raw_line = connection.readline()
+
                     if not raw_line:
                         continue
 
-                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    line = raw_line.decode(
+                        "utf-8",
+                        errors="replace"
+                    ).strip()
+
                     if not line:
                         continue
 
                     print(line)
 
-                    match = TIME_PATTERN.fullmatch(line)
+                    match = TELEMETRY_PATTERN.fullmatch(line)
+
                     if match is None:
                         continue
 
                     time_ms = int(match.group(1))
-                    computer_time = datetime.now().isoformat(timespec="milliseconds")
+                    status = match.group(2)
 
-                    writer.writerow([computer_time, time_ms])
+                    computer_time = datetime.now().isoformat(
+                        timespec="milliseconds"
+                    )
+
+                    writer.writerow(
+                        [computer_time, time_ms, status]
+                    )
                     csv_file.flush()
 
     except KeyboardInterrupt:
-        print(f"\nLogging stopped. CSV saved to:\n{csv_path}")
+        print(
+            f"\nLogging stopped. CSV saved to:\n{csv_path}"
+        )
         return 0
 
     except SerialException as error:
         print("\nCould not open or use the serial port.")
         print(f"Reason: {error}")
         print("\nCheck that:")
-        print(f"1. The Nucleo is connected and appears as {PORT}.")
+        print(
+            f"1. The Nucleo is connected and appears as {PORT}."
+        )
         print("2. PuTTY and other serial programs are closed.")
         print("3. The COM port number is correct.")
         return 1

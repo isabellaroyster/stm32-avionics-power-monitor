@@ -113,7 +113,7 @@ int main(void)
 	  int message_length = snprintf(
 	      telemetry_message,
 	      sizeof(telemetry_message),
-	      "TIME_MS=%lu\r\n",
+		  "TIME_MS=%lu,STATUS=OK\r\n",
 	      (unsigned long)HAL_GetTick()
 	  );
 
