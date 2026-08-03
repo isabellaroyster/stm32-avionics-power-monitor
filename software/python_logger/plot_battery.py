@@ -8,6 +8,7 @@ Expected CSV columns:
 from __future__ import annotations
 
 import csv
+import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -33,25 +34,44 @@ def main() -> None:
 
     newest_csv = csv_files[0]
 
-    time_seconds: list[float] = []
+    elapsed_seconds: list[float] = []
     battery_volts: list[float] = []
     low_battery_times: list[float] = []
     low_battery_volts: list[float] = []
+
+    first_time_ms: int | None = None
+    previous_battery_mv: int | None = None
 
     with newest_csv.open("r", newline="", encoding="utf-8") as csv_file:
         reader = csv.DictReader(csv_file)
 
         for row in reader:
-            time_s = int(row["time_ms"]) / 1000.0
-            battery_v = int(row["battery_mv"]) / 1000.0
+            time_ms = int(row["time_ms"])
+            battery_mv = int(row["battery_mv"])
             status = row["status"]
 
-            time_seconds.append(time_s)
-            battery_volts.append(battery_v)
+            if first_time_ms is None:
+                first_time_ms = time_ms
+
+            elapsed_s = (time_ms - first_time_ms) / 1000.0
+
+            # Insert a gap when the simulated battery resets from 6.0 V to 8.4 V.
+            # This prevents the graph from drawing a misleading vertical line.
+            if (
+                previous_battery_mv is not None
+                and battery_mv > previous_battery_mv
+            ):
+                elapsed_seconds.append(math.nan)
+                battery_volts.append(math.nan)
+
+            elapsed_seconds.append(elapsed_s)
+            battery_volts.append(battery_mv / 1000.0)
 
             if status == "LOW_BATTERY":
-                low_battery_times.append(time_s)
-                low_battery_volts.append(battery_v)
+                low_battery_times.append(elapsed_s)
+                low_battery_volts.append(battery_mv / 1000.0)
+
+            previous_battery_mv = battery_mv
 
     if not battery_volts:
         raise ValueError(f"The CSV contains no battery telemetry: {newest_csv}")
@@ -59,7 +79,12 @@ def main() -> None:
     print(f"Plotting: {newest_csv}")
 
     plt.figure()
-    plt.plot(time_seconds, battery_volts, marker="o", label="Battery voltage")
+    plt.plot(
+        elapsed_seconds,
+        battery_volts,
+        marker="o",
+        label="Battery voltage",
+    )
     plt.axhline(
         LOW_BATTERY_THRESHOLD_MV / 1000.0,
         linestyle="--",
@@ -76,7 +101,7 @@ def main() -> None:
         )
 
     plt.title("Simulated Battery Telemetry")
-    plt.xlabel("STM32 Uptime (seconds)")
+    plt.xlabel("Elapsed Test Time (seconds)")
     plt.ylabel("Battery Voltage (V)")
     plt.grid(True)
     plt.legend()
