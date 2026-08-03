@@ -99,7 +99,8 @@ int main(void)
       HAL_MAX_DELAY
   );
 
-  char telemetry_message[64];
+  char telemetry_message[96];
+  uint32_t simulated_battery_mv = 8400U;
 
   /* USER CODE END 2 */
 
@@ -110,11 +111,24 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	  const char *system_status;
+
+	  if (simulated_battery_mv < 7000U)
+	  {
+	      system_status = "LOW_BATTERY";
+	  }
+	  else
+	  {
+	      system_status = "OK";
+	  }
+
 	  int message_length = snprintf(
 	      telemetry_message,
 	      sizeof(telemetry_message),
-		  "TIME_MS=%lu,STATUS=OK\r\n",
-	      (unsigned long)HAL_GetTick()
+	      "TIME_MS=%lu,BATTERY_MV=%lu,STATUS=%s\r\n",
+	      (unsigned long)HAL_GetTick(),
+	      (unsigned long)simulated_battery_mv,
+	      system_status
 	  );
 
 	  HAL_UART_Transmit(
@@ -123,6 +137,15 @@ int main(void)
 	      (uint16_t)message_length,
 	      HAL_MAX_DELAY
 	  );
+
+	  if (simulated_battery_mv > 6000U)
+	  {
+	      simulated_battery_mv -= 200U;
+	  }
+	  else
+	  {
+	      simulated_battery_mv = 8400U;
+	  }
 
 	  HAL_Delay(1000);
   }

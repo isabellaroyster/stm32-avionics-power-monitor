@@ -1,10 +1,10 @@
 """
 STM32 UART CSV Logger
 
-Reads telemetry from the NUCLEO-G071RB over a Windows COM port.
+Reads telemetry from the NUCLEO-G071RB over COM3.
 
 Expected telemetry format:
-    TIME_MS=12345,STATUS=OK
+    TIME_MS=12345,BATTERY_MV=8400,STATUS=OK
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ BAUD_RATE = 115200
 TIMEOUT_SECONDS = 1
 
 TELEMETRY_PATTERN = re.compile(
-    r"^TIME_MS=(\d+),STATUS=([A-Z_]+)$"
+    r"^TIME_MS=(\d+),BATTERY_MV=(\d+),STATUS=([A-Z_]+)$"
 )
 
 
@@ -33,7 +33,7 @@ def main() -> int:
     logs_directory.mkdir(exist_ok=True)
 
     filename = datetime.now().strftime(
-        "uptime_log_%Y-%m-%d_%H-%M-%S.csv"
+        "battery_log_%Y-%m-%d_%H-%M-%S.csv"
     )
     csv_path = logs_directory / filename
 
@@ -54,7 +54,7 @@ def main() -> int:
             ) as csv_file:
                 writer = csv.writer(csv_file)
                 writer.writerow(
-                    ["computer_time", "time_ms", "status"]
+                    ["computer_time", "time_ms", "battery_mv", "status"]
                 )
 
                 print(
@@ -83,14 +83,15 @@ def main() -> int:
                         continue
 
                     time_ms = int(match.group(1))
-                    status = match.group(2)
+                    battery_mv = int(match.group(2))
+                    status = match.group(3)
 
                     computer_time = datetime.now().isoformat(
                         timespec="milliseconds"
                     )
 
                     writer.writerow(
-                        [computer_time, time_ms, status]
+                        [computer_time, time_ms, battery_mv, status]
                     )
                     csv_file.flush()
 
