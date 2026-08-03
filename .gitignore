@@ -68,3 +68,5 @@ Release/
 
 # Local STM32CubeIDE launch configurations
 *.launch
+
+software/python_logger/logs/
