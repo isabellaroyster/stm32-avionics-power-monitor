@@ -42,4 +42,4 @@ This project is currently in development.
 
 ## Current Milestone
 
-The first milestone is to program the STM32 board, blink the onboard LED, and upload the working firmware to GitHub.
+The STM32 currently transmits structured uptime and system-status telemetry over UART. A Python application receives the data through the ST-LINK virtual COM port, saves it to CSV, and generates telemetry graphs.
