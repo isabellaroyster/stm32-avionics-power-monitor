@@ -94,7 +94,43 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+  /* =========================
+     Variables
+     ========================= */
+
+  /* Startup / sensor detection messages */
   uint8_t startup_message[] = "Avionics monitor started\r\n";
+  uint8_t imu_found[] = "LSM6DSOX FOUND\r\n";
+  uint8_t imu_missing[] = "LSM6DSOX NOT FOUND\r\n";
+
+  /* WHO_AM_I register data */
+  uint8_t who_am_i = 0;
+  char imu_id_message[64];
+
+  /* Accelerometer configuration and data */
+  uint8_t accel_config = 0x40;
+  uint8_t accel_data[6];
+
+  int16_t accel_x;
+  int16_t accel_y;
+  int16_t accel_z;
+
+  /* Gyroscope configuration and data */
+  uint8_t gyro_config = 0x40;
+  uint8_t gyro_data[6];
+
+  int16_t gyro_x;
+  int16_t gyro_y;
+  int16_t gyro_z;
+
+  /* Battery telemetry */
+  char telemetry_message[96];
+  uint32_t simulated_battery_mv = 8400U;
+
+
+  /* =========================
+     Startup UART message
+     ========================= */
 
   HAL_UART_Transmit(
       &huart2,
@@ -103,9 +139,10 @@ int main(void)
       HAL_MAX_DELAY
   );
 
-  /* Check whether the LSM6DSOX responds over I2C */
-  uint8_t imu_found[] = "LSM6DSOX FOUND\r\n";
-  uint8_t imu_missing[] = "LSM6DSOX NOT FOUND\r\n";
+
+  /* =========================
+     Check for LSM6DSOX
+     ========================= */
 
   if (HAL_I2C_IsDeviceReady(
           &hi2c1,
@@ -130,8 +167,10 @@ int main(void)
       );
   }
 
-  uint8_t who_am_i = 0;
-  char imu_id_message[64];
+
+  /* =========================
+     Read WHO_AM_I register
+     ========================= */
 
   if (HAL_I2C_Mem_Read(
           &hi2c1,
@@ -168,9 +207,45 @@ int main(void)
       );
   }
 
-  /* Telemetry variables */
-  char telemetry_message[96];
-  uint32_t simulated_battery_mv = 8400U;
+
+  /* =========================
+     Configure accelerometer
+     ========================= */
+
+  /*
+   * CTRL1_XL register = 0x10
+   * 0x40 = 104 Hz output data rate
+   *        +/- 2 g measurement range
+   */
+  HAL_I2C_Mem_Write(
+      &hi2c1,
+      (0x6A << 1),
+      0x10,
+      I2C_MEMADD_SIZE_8BIT,
+      &accel_config,
+      1,
+      100
+  );
+
+
+  /* =========================
+     Configure gyroscope
+     ========================= */
+
+  /*
+   * CTRL2_G register = 0x11
+   * 0x40 = 104 Hz output data rate
+   *        +/- 250 degrees/second range
+   */
+  HAL_I2C_Mem_Write(
+      &hi2c1,
+      (0x6A << 1),
+      0x11,
+      I2C_MEMADD_SIZE_8BIT,
+      &gyro_config,
+      1,
+      100
+  );
 
   /* USER CODE END 2 */
 
@@ -181,44 +256,148 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  const char *system_status;
+	    /* ========================================
+	       Read accelerometer data
+	       ======================================== */
 
-	  if (simulated_battery_mv < 7000U)
-	  {
-	      system_status = "LOW_BATTERY";
-	  }
-	  else
-	  {
-	      system_status = "OK";
-	  }
+	    if (HAL_I2C_Mem_Read(
+	            &hi2c1,
+	            (0x6A << 1),
+	            0x28,
+	            I2C_MEMADD_SIZE_8BIT,
+	            accel_data,
+	            6,
+	            100) == HAL_OK)
+	    {
+	        /* Combine low + high bytes into 16-bit values */
+	        accel_x = (int16_t)((accel_data[1] << 8) | accel_data[0]);
+	        accel_y = (int16_t)((accel_data[3] << 8) | accel_data[2]);
+	        accel_z = (int16_t)((accel_data[5] << 8) | accel_data[4]);
 
-	  int message_length = snprintf(
-	      telemetry_message,
-	      sizeof(telemetry_message),
-	      "TIME_MS=%lu,BATTERY_MV=%lu,STATUS=%s\r\n",
-	      (unsigned long)HAL_GetTick(),
-	      (unsigned long)simulated_battery_mv,
-	      system_status
-	  );
+	        /* Convert raw counts to milli-g */
+	        int32_t accel_x_mg = ((int32_t)accel_x * 61) / 1000;
+	        int32_t accel_y_mg = ((int32_t)accel_y * 61) / 1000;
+	        int32_t accel_z_mg = ((int32_t)accel_z * 61) / 1000;
 
-	  HAL_UART_Transmit(
-	      &huart2,
-	      (uint8_t *)telemetry_message,
-	      (uint16_t)message_length,
-	      HAL_MAX_DELAY
-	  );
+	        char accel_message[96];
 
-	  if (simulated_battery_mv > 6000U)
-	  {
-	      simulated_battery_mv -= 200U;
-	  }
-	  else
-	  {
-	      simulated_battery_mv = 8400U;
-	  }
+	        int accel_length = snprintf(
+	            accel_message,
+	            sizeof(accel_message),
+	            "ACCEL_MG X=%ld Y=%ld Z=%ld\r\n",
+	            (long)accel_x_mg,
+	            (long)accel_y_mg,
+	            (long)accel_z_mg
+	        );
 
-	  HAL_Delay(1000);
-  }
+	        HAL_UART_Transmit(
+	            &huart2,
+	            (uint8_t *)accel_message,
+	            (uint16_t)accel_length,
+	            HAL_MAX_DELAY
+	        );
+	    }
+
+
+	    /* ========================================
+	       Read gyroscope data
+	       ======================================== */
+
+	    if (HAL_I2C_Mem_Read(
+	            &hi2c1,
+	            (0x6A << 1),
+	            0x22,
+	            I2C_MEMADD_SIZE_8BIT,
+	            gyro_data,
+	            6,
+	            100) == HAL_OK)
+	    {
+	        /* Combine low + high bytes into 16-bit values */
+	        gyro_x = (int16_t)((gyro_data[1] << 8) | gyro_data[0]);
+	        gyro_y = (int16_t)((gyro_data[3] << 8) | gyro_data[2]);
+	        gyro_z = (int16_t)((gyro_data[5] << 8) | gyro_data[4]);
+
+	        /* Convert raw values to milli-degrees per second */
+	        int32_t gyro_x_mdps = ((int32_t)gyro_x * 875) / 100;
+	        int32_t gyro_y_mdps = ((int32_t)gyro_y * 875) / 100;
+	        int32_t gyro_z_mdps = ((int32_t)gyro_z * 875) / 100;
+
+	        char gyro_message[96];
+
+	        int gyro_length = snprintf(
+	            gyro_message,
+	            sizeof(gyro_message),
+	            "GYRO_MDPS X=%ld Y=%ld Z=%ld\r\n",
+	            (long)gyro_x_mdps,
+	            (long)gyro_y_mdps,
+	            (long)gyro_z_mdps
+	        );
+
+	        HAL_UART_Transmit(
+	            &huart2,
+	            (uint8_t *)gyro_message,
+	            (uint16_t)gyro_length,
+	            HAL_MAX_DELAY
+	        );
+	    }
+
+
+	    /* ========================================
+	       Determine battery status
+	       ======================================== */
+
+	    const char *system_status;
+
+	    if (simulated_battery_mv < 7000U)
+	    {
+	        system_status = "LOW_BATTERY";
+	    }
+	    else
+	    {
+	        system_status = "OK";
+	    }
+
+
+	    /* ========================================
+	       Create battery telemetry
+	       ======================================== */
+
+	    int message_length = snprintf(
+	        telemetry_message,
+	        sizeof(telemetry_message),
+	        "TIME_MS=%lu,BATTERY_MV=%lu,STATUS=%s\r\n",
+	        (unsigned long)HAL_GetTick(),
+	        (unsigned long)simulated_battery_mv,
+	        system_status
+	    );
+
+
+	    /* Send battery telemetry */
+	    HAL_UART_Transmit(
+	        &huart2,
+	        (uint8_t *)telemetry_message,
+	        (uint16_t)message_length,
+	        HAL_MAX_DELAY
+	    );
+
+
+	    /* ========================================
+	       Simulate battery discharge
+	       ======================================== */
+
+	    if (simulated_battery_mv > 6000U)
+	    {
+	        simulated_battery_mv -= 200U;
+	    }
+	    else
+	    {
+	        simulated_battery_mv = 8400U;
+	    }
+
+
+	    /* Wait approximately one second */
+	    HAL_Delay(1000);
+	}
   /* USER CODE END 3 */
 }
 
