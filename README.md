@@ -42,4 +42,15 @@ This project is currently in development.
 
 ## Current Milestone
 
-The STM32 currently transmits structured uptime and system-status telemetry over UART. A Python application receives the data through the ST-LINK virtual COM port, saves it to CSV, and generates telemetry graphs.
+Integrated an LSM6DSOX 6-axis IMU with the STM32 NUCLEO-G071RB over I2C.
+
+The firmware currently:
+- Detects the LSM6DSOX over I2C
+- Verifies the WHO_AM_I register (`0x6C`)
+- Reads 3-axis accelerometer data
+- Converts acceleration to milli-g (mg)
+- Reads 3-axis gyroscope data
+- Converts angular velocity to milli-degrees per second (mdps)
+- Sends live sensor and battery telemetry over UART
+
+I also soldered the IMU header pins, wired the sensor to the STM32, configured the device registers in embedded C, and verified both orientation and rotation measurements using real motion tests.
