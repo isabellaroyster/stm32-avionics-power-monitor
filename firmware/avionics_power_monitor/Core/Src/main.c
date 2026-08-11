@@ -40,6 +40,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+
 I2C_HandleTypeDef hi2c1;
 
 UART_HandleTypeDef huart2;
@@ -53,6 +55,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -93,6 +96,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_I2C1_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   /* =========================
      Variables
@@ -107,7 +111,7 @@ int main(void)
   uint8_t who_am_i = 0;
   char imu_id_message[64];
 
-  /* Accelerometer configuration and data */
+  /* Accelerometer configuration and raw data */
   uint8_t accel_config = 0x40;
   uint8_t accel_data[6];
 
@@ -115,7 +119,12 @@ int main(void)
   int16_t accel_y;
   int16_t accel_z;
 
-  /* Gyroscope configuration and data */
+  /* Converted accelerometer values */
+  int32_t accel_x_mg = 0;
+  int32_t accel_y_mg = 0;
+  int32_t accel_z_mg = 0;
+
+  /* Gyroscope configuration and raw data */
   uint8_t gyro_config = 0x40;
   uint8_t gyro_data[6];
 
@@ -123,9 +132,35 @@ int main(void)
   int16_t gyro_y;
   int16_t gyro_z;
 
-  /* Battery telemetry */
-  char telemetry_message[96];
-  uint32_t simulated_battery_mv = 8400U;
+  /* Converted gyroscope values */
+  int32_t gyro_x_mdps = 0;
+  int32_t gyro_y_mdps = 0;
+  int32_t gyro_z_mdps = 0;
+
+
+  /* =========================
+     REAL battery ADC variables
+     ========================= */
+
+  /* Raw 12-bit ADC result: 0 to 4095 */
+  uint32_t adc_raw = 0;
+
+  /* Calculated actual battery voltage in millivolts */
+  uint32_t battery_mv = 0;
+
+  /* Large buffer for complete telemetry packet */
+  char telemetry_message[256];
+
+
+  /* =========================
+     Calibrate ADC
+     ========================= */
+
+  /*
+   * The STM32G0 ADC has a built-in self-calibration routine.
+   * Run calibration before starting ADC conversions.
+   */
+  HAL_ADCEx_Calibration_Start(&hadc1);
 
 
   /* =========================
@@ -212,11 +247,6 @@ int main(void)
      Configure accelerometer
      ========================= */
 
-  /*
-   * CTRL1_XL register = 0x10
-   * 0x40 = 104 Hz output data rate
-   *        +/- 2 g measurement range
-   */
   HAL_I2C_Mem_Write(
       &hi2c1,
       (0x6A << 1),
@@ -232,11 +262,6 @@ int main(void)
      Configure gyroscope
      ========================= */
 
-  /*
-   * CTRL2_G register = 0x11
-   * 0x40 = 104 Hz output data rate
-   *        +/- 250 degrees/second range
-   */
   HAL_I2C_Mem_Write(
       &hi2c1,
       (0x6A << 1),
@@ -256,148 +281,145 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	    /* ========================================
-	       Read accelerometer data
-	       ======================================== */
+	  /* ========================================
+	         Read accelerometer
+	         ======================================== */
 
-	    if (HAL_I2C_Mem_Read(
-	            &hi2c1,
-	            (0x6A << 1),
-	            0x28,
-	            I2C_MEMADD_SIZE_8BIT,
-	            accel_data,
-	            6,
-	            100) == HAL_OK)
-	    {
-	        /* Combine low + high bytes into 16-bit values */
-	        accel_x = (int16_t)((accel_data[1] << 8) | accel_data[0]);
-	        accel_y = (int16_t)((accel_data[3] << 8) | accel_data[2]);
-	        accel_z = (int16_t)((accel_data[5] << 8) | accel_data[4]);
+	      if (HAL_I2C_Mem_Read(
+	              &hi2c1,
+	              (0x6A << 1),
+	              0x28,
+	              I2C_MEMADD_SIZE_8BIT,
+	              accel_data,
+	              6,
+	              100) == HAL_OK)
+	      {
+	          accel_x = (int16_t)((accel_data[1] << 8) | accel_data[0]);
+	          accel_y = (int16_t)((accel_data[3] << 8) | accel_data[2]);
+	          accel_z = (int16_t)((accel_data[5] << 8) | accel_data[4]);
 
-	        /* Convert raw counts to milli-g */
-	        int32_t accel_x_mg = ((int32_t)accel_x * 61) / 1000;
-	        int32_t accel_y_mg = ((int32_t)accel_y * 61) / 1000;
-	        int32_t accel_z_mg = ((int32_t)accel_z * 61) / 1000;
-
-	        char accel_message[96];
-
-	        int accel_length = snprintf(
-	            accel_message,
-	            sizeof(accel_message),
-	            "ACCEL_MG X=%ld Y=%ld Z=%ld\r\n",
-	            (long)accel_x_mg,
-	            (long)accel_y_mg,
-	            (long)accel_z_mg
-	        );
-
-	        HAL_UART_Transmit(
-	            &huart2,
-	            (uint8_t *)accel_message,
-	            (uint16_t)accel_length,
-	            HAL_MAX_DELAY
-	        );
-	    }
+	          accel_x_mg = ((int32_t)accel_x * 61) / 1000;
+	          accel_y_mg = ((int32_t)accel_y * 61) / 1000;
+	          accel_z_mg = ((int32_t)accel_z * 61) / 1000;
+	      }
 
 
-	    /* ========================================
-	       Read gyroscope data
-	       ======================================== */
+	      /* ========================================
+	         Read gyroscope
+	         ======================================== */
 
-	    if (HAL_I2C_Mem_Read(
-	            &hi2c1,
-	            (0x6A << 1),
-	            0x22,
-	            I2C_MEMADD_SIZE_8BIT,
-	            gyro_data,
-	            6,
-	            100) == HAL_OK)
-	    {
-	        /* Combine low + high bytes into 16-bit values */
-	        gyro_x = (int16_t)((gyro_data[1] << 8) | gyro_data[0]);
-	        gyro_y = (int16_t)((gyro_data[3] << 8) | gyro_data[2]);
-	        gyro_z = (int16_t)((gyro_data[5] << 8) | gyro_data[4]);
+	      if (HAL_I2C_Mem_Read(
+	              &hi2c1,
+	              (0x6A << 1),
+	              0x22,
+	              I2C_MEMADD_SIZE_8BIT,
+	              gyro_data,
+	              6,
+	              100) == HAL_OK)
+	      {
+	          gyro_x = (int16_t)((gyro_data[1] << 8) | gyro_data[0]);
+	          gyro_y = (int16_t)((gyro_data[3] << 8) | gyro_data[2]);
+	          gyro_z = (int16_t)((gyro_data[5] << 8) | gyro_data[4]);
 
-	        /* Convert raw values to milli-degrees per second */
-	        int32_t gyro_x_mdps = ((int32_t)gyro_x * 875) / 100;
-	        int32_t gyro_y_mdps = ((int32_t)gyro_y * 875) / 100;
-	        int32_t gyro_z_mdps = ((int32_t)gyro_z * 875) / 100;
-
-	        char gyro_message[96];
-
-	        int gyro_length = snprintf(
-	            gyro_message,
-	            sizeof(gyro_message),
-	            "GYRO_MDPS X=%ld Y=%ld Z=%ld\r\n",
-	            (long)gyro_x_mdps,
-	            (long)gyro_y_mdps,
-	            (long)gyro_z_mdps
-	        );
-
-	        HAL_UART_Transmit(
-	            &huart2,
-	            (uint8_t *)gyro_message,
-	            (uint16_t)gyro_length,
-	            HAL_MAX_DELAY
-	        );
-	    }
+	          gyro_x_mdps = ((int32_t)gyro_x * 875) / 100;
+	          gyro_y_mdps = ((int32_t)gyro_y * 875) / 100;
+	          gyro_z_mdps = ((int32_t)gyro_z * 875) / 100;
+	      }
 
 
-	    /* ========================================
-	       Determine battery status
-	       ======================================== */
+	      /* ========================================
+	         Read REAL battery voltage using ADC
+	         ======================================== */
 
-	    const char *system_status;
+	      HAL_ADC_Start(&hadc1);
 
-	    if (simulated_battery_mv < 7000U)
-	    {
-	        system_status = "LOW_BATTERY";
-	    }
-	    else
-	    {
-	        system_status = "OK";
-	    }
+	      if (HAL_ADC_PollForConversion(
+	              &hadc1,
+	              100) == HAL_OK)
+	      {
+	          adc_raw = HAL_ADC_GetValue(&hadc1);
 
+	          /*
+	           * STM32 ADC:
+	           * 12-bit ADC = 0 to 4095
+	           * Assumed ADC reference = 3300 mV
+	           *
+	           * Voltage divider:
+	           *
+	           * Battery+ -- 100k -- A0 -- 33k -- GND
+	           *
+	           * Divider ratio:
+	           * Battery voltage = A0 voltage * (100 + 33) / 33
+	           *
+	           * Combined equation:
+	           *
+	           * battery_mv =
+	           * ADCraw × 3300 × 133
+	           * -------------------
+	           *      4095 × 33
+	           */
 
-	    /* ========================================
-	       Create battery telemetry
-	       ======================================== */
+	          battery_mv =
+	              ((uint64_t)adc_raw * 3300U * 133U) /
+	              (4095U * 33U);
+	      }
 
-	    int message_length = snprintf(
-	        telemetry_message,
-	        sizeof(telemetry_message),
-	        "TIME_MS=%lu,BATTERY_MV=%lu,STATUS=%s\r\n",
-	        (unsigned long)HAL_GetTick(),
-	        (unsigned long)simulated_battery_mv,
-	        system_status
-	    );
-
-
-	    /* Send battery telemetry */
-	    HAL_UART_Transmit(
-	        &huart2,
-	        (uint8_t *)telemetry_message,
-	        (uint16_t)message_length,
-	        HAL_MAX_DELAY
-	    );
-
-
-	    /* ========================================
-	       Simulate battery discharge
-	       ======================================== */
-
-	    if (simulated_battery_mv > 6000U)
-	    {
-	        simulated_battery_mv -= 200U;
-	    }
-	    else
-	    {
-	        simulated_battery_mv = 8400U;
-	    }
+	      HAL_ADC_Stop(&hadc1);
 
 
-	    /* Wait approximately one second */
-	    HAL_Delay(1000);
-	}
+	      /* ========================================
+	         Determine system status
+	         ======================================== */
+
+	      const char *system_status;
+
+	      if (battery_mv < 7000U)
+	      {
+	          system_status = "LOW_BATTERY";
+	      }
+	      else
+	      {
+	          system_status = "OK";
+	      }
+
+
+	      /* ========================================
+	         Create complete telemetry packet
+	         ======================================== */
+
+	      int message_length = snprintf(
+	          telemetry_message,
+	          sizeof(telemetry_message),
+	          "TIME_MS=%lu,BATTERY_MV=%lu,STATUS=%s,"
+	          "ACCEL_X_MG=%ld,ACCEL_Y_MG=%ld,ACCEL_Z_MG=%ld,"
+	          "GYRO_X_MDPS=%ld,GYRO_Y_MDPS=%ld,GYRO_Z_MDPS=%ld\r\n",
+	          (unsigned long)HAL_GetTick(),
+	          (unsigned long)battery_mv,
+	          system_status,
+	          (long)accel_x_mg,
+	          (long)accel_y_mg,
+	          (long)accel_z_mg,
+	          (long)gyro_x_mdps,
+	          (long)gyro_y_mdps,
+	          (long)gyro_z_mdps
+	      );
+
+
+	      /* ========================================
+	         Send telemetry over UART
+	         ======================================== */
+
+	      HAL_UART_Transmit(
+	          &huart2,
+	          (uint8_t *)telemetry_message,
+	          (uint16_t)message_length,
+	          HAL_MAX_DELAY
+	      );
+
+
+	      /* Send one complete packet every second */
+	      HAL_Delay(1000);
+	  }
   /* USER CODE END 3 */
 }
 
@@ -439,6 +461,65 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+
+  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait = DISABLE;
+  hadc1.Init.LowPowerAutoPowerOff = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_79CYCLES_5;
+  hadc1.Init.SamplingTimeCommon2 = ADC_SAMPLETIME_1CYCLE_5;
+  hadc1.Init.OversamplingMode = DISABLE;
+  hadc1.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_HIGH;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_0;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLINGTIME_COMMON_1;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
+  /* USER CODE END ADC1_Init 2 */
+
 }
 
 /**
