@@ -1,113 +1,174 @@
-"""
-Plot the newest simulated battery telemetry CSV log.
-
-Expected CSV columns:
-    computer_time,time_ms,battery_mv,status
-"""
-
-from __future__ import annotations
-
 import csv
-import math
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 
 
-LOW_BATTERY_THRESHOLD_MV = 7000
+# ========================================
+# Project folders
+# ========================================
+
+SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+LOG_DIRECTORY = SCRIPT_DIRECTORY / "logs"
+PLOT_DIRECTORY = SCRIPT_DIRECTORY / "plots"
+
+PLOT_DIRECTORY.mkdir(exist_ok=True)
 
 
-def main() -> None:
-    script_folder = Path(__file__).resolve().parent
-    logs_folder = script_folder / "logs"
+# ========================================
+# Find newest avionics log
+# ========================================
 
-    csv_files = sorted(
-        logs_folder.glob("battery_log_*.csv"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
+log_files = list(LOG_DIRECTORY.glob("avionics_log_*.csv"))
 
-    if not csv_files:
-        raise FileNotFoundError(
-            "No battery CSV files were found. Run serial_logger.py first."
+if not log_files:
+    print("No avionics log files were found.")
+    print("Run serial_logger.py first.")
+    raise SystemExit
+
+latest_log = max(
+    log_files,
+    key=lambda file: file.stat().st_mtime
+)
+
+print(f"Using log file: {latest_log.name}")
+
+
+# ========================================
+# Telemetry data lists
+# ========================================
+
+time_seconds = []
+battery_voltage = []
+statuses = []
+
+
+# ========================================
+# Read CSV
+# ========================================
+
+with open(latest_log, "r", newline="") as csv_file:
+
+    reader = csv.DictReader(csv_file)
+
+    first_time_ms = None
+
+    for row in reader:
+
+        current_time_ms = int(row["time_ms"])
+
+        if first_time_ms is None:
+            first_time_ms = current_time_ms
+
+        elapsed_seconds = (
+            current_time_ms - first_time_ms
+        ) / 1000.0
+
+        time_seconds.append(elapsed_seconds)
+
+        # Convert millivolts to volts
+        battery_voltage.append(
+            int(row["battery_mv"]) / 1000.0
         )
 
-    newest_csv = csv_files[0]
+        statuses.append(row["status"])
 
-    elapsed_seconds: list[float] = []
-    battery_volts: list[float] = []
-    low_battery_times: list[float] = []
-    low_battery_volts: list[float] = []
 
-    first_time_ms: int | None = None
-    previous_battery_mv: int | None = None
+# ========================================
+# Make sure telemetry exists
+# ========================================
 
-    with newest_csv.open("r", newline="", encoding="utf-8") as csv_file:
-        reader = csv.DictReader(csv_file)
+if not time_seconds:
+    print("The CSV does not contain telemetry data.")
+    raise SystemExit
 
-        for row in reader:
-            time_ms = int(row["time_ms"])
-            battery_mv = int(row["battery_mv"])
-            status = row["status"]
 
-            if first_time_ms is None:
-                first_time_ms = time_ms
+# ========================================
+# Find low-battery samples
+# ========================================
 
-            elapsed_s = (time_ms - first_time_ms) / 1000.0
+low_battery_time = []
+low_battery_voltage = []
 
-            # Insert a gap when the simulated battery resets from 6.0 V to 8.4 V.
-            # This prevents the graph from drawing a misleading vertical line.
-            if (
-                previous_battery_mv is not None
-                and battery_mv > previous_battery_mv
-            ):
-                elapsed_seconds.append(math.nan)
-                battery_volts.append(math.nan)
+for index, status in enumerate(statuses):
 
-            elapsed_seconds.append(elapsed_s)
-            battery_volts.append(battery_mv / 1000.0)
+    if status == "LOW_BATTERY":
 
-            if status == "LOW_BATTERY":
-                low_battery_times.append(elapsed_s)
-                low_battery_volts.append(battery_mv / 1000.0)
-
-            previous_battery_mv = battery_mv
-
-    if not battery_volts:
-        raise ValueError(f"The CSV contains no battery telemetry: {newest_csv}")
-
-    print(f"Plotting: {newest_csv}")
-
-    plt.figure()
-    plt.plot(
-        elapsed_seconds,
-        battery_volts,
-        marker="o",
-        label="Battery voltage",
-    )
-    plt.axhline(
-        LOW_BATTERY_THRESHOLD_MV / 1000.0,
-        linestyle="--",
-        label="Low-battery threshold",
-    )
-
-    if low_battery_times:
-        plt.scatter(
-            low_battery_times,
-            low_battery_volts,
-            marker="x",
-            s=80,
-            label="LOW_BATTERY",
+        low_battery_time.append(
+            time_seconds[index]
         )
 
-    plt.title("Simulated Battery Telemetry")
-    plt.xlabel("Elapsed Test Time (seconds)")
-    plt.ylabel("Battery Voltage (V)")
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+        low_battery_voltage.append(
+            battery_voltage[index]
+        )
 
 
-if __name__ == "__main__":
-    main()
+# ========================================
+# Create battery graph
+# ========================================
+
+plt.figure(figsize=(10, 6))
+
+plt.plot(
+    time_seconds,
+    battery_voltage,
+    marker="o",
+    label="Measured Battery Voltage"
+)
+
+# Low-battery threshold
+plt.axhline(
+    y=7.0,
+    linestyle="--",
+    label="Low-Battery Threshold (7.0 V)"
+)
+
+# Highlight samples where fault is active
+if low_battery_time:
+
+    plt.scatter(
+        low_battery_time,
+        low_battery_voltage,
+        marker="x",
+        s=80,
+        label="LOW_BATTERY Fault"
+    )
+
+
+# ========================================
+# Labels
+# ========================================
+
+plt.title("STM32 Real Battery Voltage Monitoring")
+
+plt.xlabel("Elapsed Time (seconds)")
+plt.ylabel("Battery Voltage (V)")
+
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+
+
+# ========================================
+# Save graph
+# ========================================
+
+battery_plot_path = (
+    PLOT_DIRECTORY / "real_battery_telemetry.png"
+)
+
+plt.savefig(
+    battery_plot_path,
+    dpi=300
+)
+
+print()
+print("Battery graph created successfully.")
+print(f"Saved to: {battery_plot_path}")
+
+
+# ========================================
+# Display graph
+# ========================================
+
+plt.show()
