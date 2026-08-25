@@ -42,15 +42,22 @@ This project is currently in development.
 
 ## Current Milestone
 
-Integrated an LSM6DSOX 6-axis IMU with the STM32 NUCLEO-G071RB over I2C.
+## Reliability and Fault-Recovery Testing
 
-The firmware currently:
-- Detects the LSM6DSOX over I2C
-- Verifies the WHO_AM_I register (`0x6C`)
-- Reads 3-axis accelerometer data
-- Converts acceleration to milli-g (mg)
-- Reads 3-axis gyroscope data
-- Converts angular velocity to milli-degrees per second (mdps)
-- Sends live sensor and battery telemetry over UART
+The system was tested by deliberately introducing hardware faults during live operation to verify that the firmware could detect failures, prevent stale telemetry, and automatically recover without requiring a reset.
 
-I also soldered the IMU header pins, wired the sensor to the STM32, configured the device registers in embedded C, and verified both orientation and rotation measurements using real motion tests.
+### Test Results
+
+- Total test duration: 96.1 seconds
+- BMP390 communication fault: detected and recovered
+- LSM6DSOX communication fault: detected and recovered
+- Low-battery condition: detected and recovered
+- Successful recoveries: 3
+- Final system state: OK
+- Test result: PASS
+
+During sensor communication failures, invalid sensor measurements are cleared rather than continuing to transmit stale data. When the sensor reconnects, the STM32 automatically detects it, reapplies its configuration, and resumes normal telemetry.
+
+### System Health Timeline
+
+![System Health and Fault Recovery](software/python_logger/plots/system_health_fault_recovery.png)
