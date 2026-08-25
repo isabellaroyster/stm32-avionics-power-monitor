@@ -600,73 +600,187 @@ int main(void)
 	         Sensor health flags
 	         ======================================== */
 
-	      uint8_t imu_ok = 1U;
+	      uint8_t imu_ok = 0U;
 	      uint8_t bmp390_ok = 0U;
 
 
 	      /* ========================================
-	         Read accelerometer
+	         Try to read LSM6DSOX
 	         ======================================== */
 
-	      if (HAL_I2C_Mem_Read(
-	              &hi2c1,
-	              (0x6A << 1),
-	              0x28,
-	              I2C_MEMADD_SIZE_8BIT,
-	              accel_data,
-	              6,
-	              100) == HAL_OK)
-	      {
-	          accel_x = (int16_t)((accel_data[1] << 8) | accel_data[0]);
-	          accel_y = (int16_t)((accel_data[3] << 8) | accel_data[2]);
-	          accel_z = (int16_t)((accel_data[5] << 8) | accel_data[4]);
+	      HAL_StatusTypeDef accel_status;
+	      HAL_StatusTypeDef gyro_status;
 
-	          accel_x_mg = ((int32_t)accel_x * 61) / 1000;
-	          accel_y_mg = ((int32_t)accel_y * 61) / 1000;
-	          accel_z_mg = ((int32_t)accel_z * 61) / 1000;
+	      accel_status = HAL_I2C_Mem_Read(
+	          &hi2c1,
+	          (0x6A << 1),
+	          0x28,
+	          I2C_MEMADD_SIZE_8BIT,
+	          accel_data,
+	          6,
+	          100
+	      );
+
+	      gyro_status = HAL_I2C_Mem_Read(
+	          &hi2c1,
+	          (0x6A << 1),
+	          0x22,
+	          I2C_MEMADD_SIZE_8BIT,
+	          gyro_data,
+	          6,
+	          100
+	      );
+
+
+	      /* ========================================
+	         Automatic LSM6DSOX recovery
+	         ======================================== */
+
+	      if ((accel_status != HAL_OK) ||
+	          (gyro_status != HAL_OK))
+	      {
+	          /*
+	           * Communication failed.
+	           *
+	           * Check if the IMU has returned to
+	           * I2C address 0x6A.
+	           */
+
+	          if (HAL_I2C_IsDeviceReady(
+	                  &hi2c1,
+	                  (0x6A << 1),
+	                  3,
+	                  100) == HAL_OK)
+	          {
+	              /*
+	               * Reapply accelerometer configuration.
+	               */
+	              HAL_I2C_Mem_Write(
+	                  &hi2c1,
+	                  (0x6A << 1),
+	                  0x10,
+	                  I2C_MEMADD_SIZE_8BIT,
+	                  &accel_config,
+	                  1,
+	                  100
+	              );
+
+
+	              /*
+	               * Reapply gyroscope configuration.
+	               */
+	              HAL_I2C_Mem_Write(
+	                  &hi2c1,
+	                  (0x6A << 1),
+	                  0x11,
+	                  I2C_MEMADD_SIZE_8BIT,
+	                  &gyro_config,
+	                  1,
+	                  100
+	              );
+
+
+	              /*
+	               * Give sensor a moment to resume.
+	               */
+	              HAL_Delay(20);
+
+
+	              /*
+	               * Retry both measurements.
+	               */
+	              accel_status = HAL_I2C_Mem_Read(
+	                  &hi2c1,
+	                  (0x6A << 1),
+	                  0x28,
+	                  I2C_MEMADD_SIZE_8BIT,
+	                  accel_data,
+	                  6,
+	                  100
+	              );
+
+	              gyro_status = HAL_I2C_Mem_Read(
+	                  &hi2c1,
+	                  (0x6A << 1),
+	                  0x22,
+	                  I2C_MEMADD_SIZE_8BIT,
+	                  gyro_data,
+	                  6,
+	                  100
+	              );
+	          }
+	      }
+
+
+	      /* ========================================
+	         Process LSM6DSOX data
+	         ======================================== */
+
+	      if ((accel_status == HAL_OK) &&
+	          (gyro_status == HAL_OK))
+	      {
+	          imu_ok = 1U;
+
+
+	          /* Accelerometer */
+	          accel_x =
+	              (int16_t)((accel_data[1] << 8) |
+	                        accel_data[0]);
+
+	          accel_y =
+	              (int16_t)((accel_data[3] << 8) |
+	                        accel_data[2]);
+
+	          accel_z =
+	              (int16_t)((accel_data[5] << 8) |
+	                        accel_data[4]);
+
+
+	          accel_x_mg =
+	              ((int32_t)accel_x * 61) / 1000;
+
+	          accel_y_mg =
+	              ((int32_t)accel_y * 61) / 1000;
+
+	          accel_z_mg =
+	              ((int32_t)accel_z * 61) / 1000;
+
+
+	          /* Gyroscope */
+	          gyro_x =
+	              (int16_t)((gyro_data[1] << 8) |
+	                        gyro_data[0]);
+
+	          gyro_y =
+	              (int16_t)((gyro_data[3] << 8) |
+	                        gyro_data[2]);
+
+	          gyro_z =
+	              (int16_t)((gyro_data[5] << 8) |
+	                        gyro_data[4]);
+
+
+	          gyro_x_mdps =
+	              ((int32_t)gyro_x * 875) / 100;
+
+	          gyro_y_mdps =
+	              ((int32_t)gyro_y * 875) / 100;
+
+	          gyro_z_mdps =
+	              ((int32_t)gyro_z * 875) / 100;
 	      }
 	      else
 	      {
 	          /*
-	           * Do not keep transmitting old accelerometer
-	           * measurements if communication fails.
+	           * IMU still unavailable.
+	           * Clear stale measurements.
 	           */
+
 	          imu_ok = 0U;
 
 	          accel_x_mg = 0;
 	          accel_y_mg = 0;
 	          accel_z_mg = 0;
-	      }
-
-
-	      /* ========================================
-	         Read gyroscope
-	         ======================================== */
-
-	      if (HAL_I2C_Mem_Read(
-	              &hi2c1,
-	              (0x6A << 1),
-	              0x22,
-	              I2C_MEMADD_SIZE_8BIT,
-	              gyro_data,
-	              6,
-	              100) == HAL_OK)
-	      {
-	          gyro_x = (int16_t)((gyro_data[1] << 8) | gyro_data[0]);
-	          gyro_y = (int16_t)((gyro_data[3] << 8) | gyro_data[2]);
-	          gyro_z = (int16_t)((gyro_data[5] << 8) | gyro_data[4]);
-
-	          gyro_x_mdps = ((int32_t)gyro_x * 875) / 100;
-	          gyro_y_mdps = ((int32_t)gyro_y * 875) / 100;
-	          gyro_z_mdps = ((int32_t)gyro_z * 875) / 100;
-	      }
-	      else
-	      {
-	          /*
-	           * If the gyro read fails, the IMU is
-	           * considered unhealthy.
-	           */
-	          imu_ok = 0U;
 
 	          gyro_x_mdps = 0;
 	          gyro_y_mdps = 0;
@@ -675,12 +789,17 @@ int main(void)
 
 
 	      /* ========================================
-	         Read BMP390 temperature + pressure
+	         BMP390 data variables
 	         ======================================== */
 
 	      int32_t bmp_temp_centi_c = 0;
 	      uint32_t bmp_pressure_pa = 0;
 	      int32_t altitude_m_x100 = 0;
+
+
+	      /* ========================================
+	         First BMP390 measurement attempt
+	         ======================================== */
 
 	      bmp390_result = bmp3_get_sensor_data(
 	          BMP3_PRESS_TEMP,
@@ -688,48 +807,145 @@ int main(void)
 	          &bmp390_device
 	      );
 
+
+	      /* ========================================
+	         Automatic BMP390 recovery
+	         ======================================== */
+
+	      if (bmp390_result != BMP3_OK)
+	      {
+	          if (HAL_I2C_IsDeviceReady(
+	                  &hi2c1,
+	                  (0x77 << 1),
+	                  3,
+	                  100) == HAL_OK)
+	          {
+	              /*
+	               * Reinitialize Bosch driver.
+	               */
+	              bmp390_result =
+	                  bmp3_init(&bmp390_device);
+
+
+	              if (bmp390_result == BMP3_OK)
+	              {
+	                  /*
+	                   * Reapply pressure and
+	                   * temperature settings.
+	                   */
+
+	                  bmp390_settings.press_en =
+	                      BMP3_ENABLE;
+
+	                  bmp390_settings.temp_en =
+	                      BMP3_ENABLE;
+
+	                  bmp390_settings.odr_filter.press_os =
+	                      BMP3_NO_OVERSAMPLING;
+
+	                  bmp390_settings.odr_filter.temp_os =
+	                      BMP3_NO_OVERSAMPLING;
+
+	                  bmp390_settings.odr_filter.odr =
+	                      BMP3_ODR_25_HZ;
+
+
+	                  bmp390_settings_select =
+	                      BMP3_SEL_PRESS_EN |
+	                      BMP3_SEL_TEMP_EN |
+	                      BMP3_SEL_PRESS_OS |
+	                      BMP3_SEL_TEMP_OS |
+	                      BMP3_SEL_ODR;
+
+
+	                  bmp390_result =
+	                      bmp3_set_sensor_settings(
+	                          bmp390_settings_select,
+	                          &bmp390_settings,
+	                          &bmp390_device
+	                      );
+	              }
+
+
+	              if (bmp390_result == BMP3_OK)
+	              {
+	                  /*
+	                   * Return BMP390 to normal mode.
+	                   */
+
+	                  bmp390_settings.op_mode =
+	                      BMP3_MODE_NORMAL;
+
+	                  bmp390_result =
+	                      bmp3_set_op_mode(
+	                          &bmp390_settings,
+	                          &bmp390_device
+	                      );
+	              }
+
+
+	              if (bmp390_result == BMP3_OK)
+	              {
+	                  HAL_Delay(50);
+
+	                  /*
+	                   * Retry measurement.
+	                   */
+
+	                  bmp390_result =
+	                      bmp3_get_sensor_data(
+	                          BMP3_PRESS_TEMP,
+	                          &bmp390_data,
+	                          &bmp390_device
+	                      );
+	              }
+	          }
+	      }
+
+
+	      /* ========================================
+	         Process BMP390 data
+	         ======================================== */
+
 	      if (bmp390_result == BMP3_OK)
 	      {
 	          bmp390_ok = 1U;
 
-	          /*
-	           * Temperature:
-	           * 24.15 C becomes 2415
-	           */
 	          bmp_temp_centi_c =
-	              (int32_t)(bmp390_data.temperature * 100.0);
+	              (int32_t)(
+	                  bmp390_data.temperature * 100.0
+	              );
 
-	          /*
-	           * Pressure in Pascals
-	           */
 	          bmp_pressure_pa =
-	              (uint32_t)(bmp390_data.pressure);
+	              (uint32_t)(
+	                  bmp390_data.pressure
+	              );
 
-
-	          /* ========================================
-	             Calculate barometric altitude
-	             ======================================== */
 
 	          if (bmp_pressure_pa > 0U)
 	          {
 	              double pressure_ratio =
-	                  (double)bmp_pressure_pa / 101325.0;
+	                  (double)bmp_pressure_pa /
+	                  101325.0;
 
 	              double altitude_m =
 	                  44330.0 *
-	                  (1.0 - pow(pressure_ratio, 0.190294957));
+	                  (
+	                      1.0 -
+	                      pow(
+	                          pressure_ratio,
+	                          0.190294957
+	                      )
+	                  );
 
 	              altitude_m_x100 =
-	                  (int32_t)(altitude_m * 100.0);
+	                  (int32_t)(
+	                      altitude_m * 100.0
+	                  );
 	          }
 	      }
 	      else
 	      {
-	          /*
-	           * The BMP390 could not be read.
-	           * Keep its outputs at zero rather than
-	           * transmitting stale measurements.
-	           */
 	          bmp390_ok = 0U;
 
 	          bmp_temp_centi_c = 0;
@@ -739,7 +955,7 @@ int main(void)
 
 
 	      /* ========================================
-	         Read REAL battery voltage using ADC
+	         Read real battery voltage
 	         ======================================== */
 
 	      HAL_ADC_Start(&hadc1);
@@ -748,10 +964,13 @@ int main(void)
 	              &hadc1,
 	              100) == HAL_OK)
 	      {
-	          adc_raw = HAL_ADC_GetValue(&hadc1);
+	          adc_raw =
+	              HAL_ADC_GetValue(&hadc1);
 
 	          battery_mv =
-	              ((uint64_t)adc_raw * 3300U * 133U) /
+	              ((uint64_t)adc_raw *
+	               3300U *
+	               133U) /
 	              (4095U * 33U);
 	      }
 
@@ -759,7 +978,7 @@ int main(void)
 
 
 	      /* ========================================
-	         Determine complete system status
+	         Determine system status
 	         ======================================== */
 
 	      uint8_t low_battery =
@@ -767,37 +986,51 @@ int main(void)
 
 	      const char *system_status;
 
-	      if (low_battery && !imu_ok && !bmp390_ok)
+
+	      if (low_battery &&
+	          !imu_ok &&
+	          !bmp390_ok)
 	      {
-	          system_status = "LOW_BATT_IMU_BMP_FAULT";
+	          system_status =
+	              "LOW_BATT_IMU_BMP_FAULT";
 	      }
-	      else if (low_battery && !imu_ok)
+	      else if (low_battery &&
+	               !imu_ok)
 	      {
-	          system_status = "LOW_BATT_IMU_FAULT";
+	          system_status =
+	              "LOW_BATT_IMU_FAULT";
 	      }
-	      else if (low_battery && !bmp390_ok)
+	      else if (low_battery &&
+	               !bmp390_ok)
 	      {
-	          system_status = "LOW_BATT_BMP_FAULT";
+	          system_status =
+	              "LOW_BATT_BMP_FAULT";
 	      }
-	      else if (!imu_ok && !bmp390_ok)
+	      else if (!imu_ok &&
+	               !bmp390_ok)
 	      {
-	          system_status = "IMU_BMP_FAULT";
+	          system_status =
+	              "IMU_BMP_FAULT";
 	      }
 	      else if (!imu_ok)
 	      {
-	          system_status = "IMU_FAULT";
+	          system_status =
+	              "IMU_FAULT";
 	      }
 	      else if (!bmp390_ok)
 	      {
-	          system_status = "BMP_FAULT";
+	          system_status =
+	              "BMP_FAULT";
 	      }
 	      else if (low_battery)
 	      {
-	          system_status = "LOW_BATTERY";
+	          system_status =
+	              "LOW_BATTERY";
 	      }
 	      else
 	      {
-	          system_status = "OK";
+	          system_status =
+	              "OK";
 	      }
 
 
@@ -836,7 +1069,7 @@ int main(void)
 
 
 	      /* ========================================
-	         Send telemetry over UART
+	         Send telemetry
 	         ======================================== */
 
 	      HAL_UART_Transmit(
@@ -847,7 +1080,6 @@ int main(void)
 	      );
 
 
-	      /* One complete telemetry packet per second */
 	      HAL_Delay(1000);
 	  }
 
