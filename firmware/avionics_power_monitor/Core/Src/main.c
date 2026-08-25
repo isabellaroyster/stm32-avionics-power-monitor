@@ -596,205 +596,261 @@ int main(void)
       /* USER CODE END WHILE */
 
       /* USER CODE BEGIN 3 */
+	  /* ========================================
+	         Sensor health flags
+	         ======================================== */
 
-      /* ========================================
-         Read accelerometer
-         ======================================== */
-
-      if (HAL_I2C_Mem_Read(
-              &hi2c1,
-              (0x6A << 1),
-              0x28,
-              I2C_MEMADD_SIZE_8BIT,
-              accel_data,
-              6,
-              100) == HAL_OK)
-      {
-          accel_x = (int16_t)((accel_data[1] << 8) | accel_data[0]);
-          accel_y = (int16_t)((accel_data[3] << 8) | accel_data[2]);
-          accel_z = (int16_t)((accel_data[5] << 8) | accel_data[4]);
-
-          accel_x_mg = ((int32_t)accel_x * 61) / 1000;
-          accel_y_mg = ((int32_t)accel_y * 61) / 1000;
-          accel_z_mg = ((int32_t)accel_z * 61) / 1000;
-      }
+	      uint8_t imu_ok = 1U;
+	      uint8_t bmp390_ok = 0U;
 
 
-      /* ========================================
-         Read gyroscope
-         ======================================== */
+	      /* ========================================
+	         Read accelerometer
+	         ======================================== */
 
-      if (HAL_I2C_Mem_Read(
-              &hi2c1,
-              (0x6A << 1),
-              0x22,
-              I2C_MEMADD_SIZE_8BIT,
-              gyro_data,
-              6,
-              100) == HAL_OK)
-      {
-          gyro_x = (int16_t)((gyro_data[1] << 8) | gyro_data[0]);
-          gyro_y = (int16_t)((gyro_data[3] << 8) | gyro_data[2]);
-          gyro_z = (int16_t)((gyro_data[5] << 8) | gyro_data[4]);
+	      if (HAL_I2C_Mem_Read(
+	              &hi2c1,
+	              (0x6A << 1),
+	              0x28,
+	              I2C_MEMADD_SIZE_8BIT,
+	              accel_data,
+	              6,
+	              100) == HAL_OK)
+	      {
+	          accel_x = (int16_t)((accel_data[1] << 8) | accel_data[0]);
+	          accel_y = (int16_t)((accel_data[3] << 8) | accel_data[2]);
+	          accel_z = (int16_t)((accel_data[5] << 8) | accel_data[4]);
 
-          gyro_x_mdps = ((int32_t)gyro_x * 875) / 100;
-          gyro_y_mdps = ((int32_t)gyro_y * 875) / 100;
-          gyro_z_mdps = ((int32_t)gyro_z * 875) / 100;
-      }
+	          accel_x_mg = ((int32_t)accel_x * 61) / 1000;
+	          accel_y_mg = ((int32_t)accel_y * 61) / 1000;
+	          accel_z_mg = ((int32_t)accel_z * 61) / 1000;
+	      }
+	      else
+	      {
+	          /*
+	           * Do not keep transmitting old accelerometer
+	           * measurements if communication fails.
+	           */
+	          imu_ok = 0U;
 
-
-      /* ========================================
-         Read BMP390 temperature + pressure
-         ======================================== */
-
-      int32_t bmp_temp_centi_c = 0;
-      uint32_t bmp_pressure_pa = 0;
-      int32_t altitude_m_x100 = 0;
-
-      bmp390_result = bmp3_get_sensor_data(
-          BMP3_PRESS_TEMP,
-          &bmp390_data,
-          &bmp390_device
-      );
-
-      if (bmp390_result == BMP3_OK)
-      {
-          /*
-           * Temperature:
-           * 24.12 C becomes 2412
-           */
-          bmp_temp_centi_c =
-              (int32_t)(bmp390_data.temperature * 100.0);
-
-          /*
-           * Pressure is returned in Pascals.
-           */
-          bmp_pressure_pa =
-              (uint32_t)(bmp390_data.pressure);
+	          accel_x_mg = 0;
+	          accel_y_mg = 0;
+	          accel_z_mg = 0;
+	      }
 
 
-          /* ========================================
-             Calculate barometric altitude
-             ======================================== */
+	      /* ========================================
+	         Read gyroscope
+	         ======================================== */
 
-          if (bmp_pressure_pa > 0U)
-          {
-              /*
-               * Standard atmosphere equation:
-               *
-               * altitude =
-               * 44330 * (1 - (P / P0)^0.1903)
-               *
-               * P  = measured pressure
-               * P0 = standard sea-level pressure
-               *      101325 Pa
-               */
+	      if (HAL_I2C_Mem_Read(
+	              &hi2c1,
+	              (0x6A << 1),
+	              0x22,
+	              I2C_MEMADD_SIZE_8BIT,
+	              gyro_data,
+	              6,
+	              100) == HAL_OK)
+	      {
+	          gyro_x = (int16_t)((gyro_data[1] << 8) | gyro_data[0]);
+	          gyro_y = (int16_t)((gyro_data[3] << 8) | gyro_data[2]);
+	          gyro_z = (int16_t)((gyro_data[5] << 8) | gyro_data[4]);
 
-              double pressure_ratio =
-                  (double)bmp_pressure_pa / 101325.0;
+	          gyro_x_mdps = ((int32_t)gyro_x * 875) / 100;
+	          gyro_y_mdps = ((int32_t)gyro_y * 875) / 100;
+	          gyro_z_mdps = ((int32_t)gyro_z * 875) / 100;
+	      }
+	      else
+	      {
+	          /*
+	           * If the gyro read fails, the IMU is
+	           * considered unhealthy.
+	           */
+	          imu_ok = 0U;
 
-              double altitude_m =
-                  44330.0 *
-                  (1.0 - pow(pressure_ratio, 0.190294957));
-
-              /*
-               * Store altitude x100 so:
-               *
-               * 274.53 meters becomes 27453
-               *
-               * This avoids floating-point printf.
-               */
-              altitude_m_x100 =
-                  (int32_t)(altitude_m * 100.0);
-          }
-      }
+	          gyro_x_mdps = 0;
+	          gyro_y_mdps = 0;
+	          gyro_z_mdps = 0;
+	      }
 
 
-      /* ========================================
-         Read REAL battery voltage using ADC
-         ======================================== */
+	      /* ========================================
+	         Read BMP390 temperature + pressure
+	         ======================================== */
 
-      HAL_ADC_Start(&hadc1);
+	      int32_t bmp_temp_centi_c = 0;
+	      uint32_t bmp_pressure_pa = 0;
+	      int32_t altitude_m_x100 = 0;
 
-      if (HAL_ADC_PollForConversion(
-              &hadc1,
-              100) == HAL_OK)
-      {
-          adc_raw = HAL_ADC_GetValue(&hadc1);
+	      bmp390_result = bmp3_get_sensor_data(
+	          BMP3_PRESS_TEMP,
+	          &bmp390_data,
+	          &bmp390_device
+	      );
 
-          battery_mv =
-              ((uint64_t)adc_raw * 3300U * 133U) /
-              (4095U * 33U);
-      }
+	      if (bmp390_result == BMP3_OK)
+	      {
+	          bmp390_ok = 1U;
 
-      HAL_ADC_Stop(&hadc1);
+	          /*
+	           * Temperature:
+	           * 24.15 C becomes 2415
+	           */
+	          bmp_temp_centi_c =
+	              (int32_t)(bmp390_data.temperature * 100.0);
 
-
-      /* ========================================
-         Determine system status
-         ======================================== */
-
-      const char *system_status;
-
-      if (battery_mv < 7000U)
-      {
-          system_status = "LOW_BATTERY";
-      }
-      else
-      {
-          system_status = "OK";
-      }
+	          /*
+	           * Pressure in Pascals
+	           */
+	          bmp_pressure_pa =
+	              (uint32_t)(bmp390_data.pressure);
 
 
-      /* ========================================
-         Create complete telemetry packet
-         ======================================== */
+	          /* ========================================
+	             Calculate barometric altitude
+	             ======================================== */
 
-      int message_length = snprintf(
-          telemetry_message,
-          sizeof(telemetry_message),
-          "TIME_MS=%lu,"
-          "BATTERY_MV=%lu,"
-          "STATUS=%s,"
-          "ACCEL_X_MG=%ld,"
-          "ACCEL_Y_MG=%ld,"
-          "ACCEL_Z_MG=%ld,"
-          "GYRO_X_MDPS=%ld,"
-          "GYRO_Y_MDPS=%ld,"
-          "GYRO_Z_MDPS=%ld,"
-          "TEMP_C_X100=%ld,"
-          "PRESSURE_PA=%lu,"
-          "ALTITUDE_M_X100=%ld\r\n",
-          (unsigned long)HAL_GetTick(),
-          (unsigned long)battery_mv,
-          system_status,
-          (long)accel_x_mg,
-          (long)accel_y_mg,
-          (long)accel_z_mg,
-          (long)gyro_x_mdps,
-          (long)gyro_y_mdps,
-          (long)gyro_z_mdps,
-          (long)bmp_temp_centi_c,
-          (unsigned long)bmp_pressure_pa,
-          (long)altitude_m_x100
-      );
+	          if (bmp_pressure_pa > 0U)
+	          {
+	              double pressure_ratio =
+	                  (double)bmp_pressure_pa / 101325.0;
+
+	              double altitude_m =
+	                  44330.0 *
+	                  (1.0 - pow(pressure_ratio, 0.190294957));
+
+	              altitude_m_x100 =
+	                  (int32_t)(altitude_m * 100.0);
+	          }
+	      }
+	      else
+	      {
+	          /*
+	           * The BMP390 could not be read.
+	           * Keep its outputs at zero rather than
+	           * transmitting stale measurements.
+	           */
+	          bmp390_ok = 0U;
+
+	          bmp_temp_centi_c = 0;
+	          bmp_pressure_pa = 0;
+	          altitude_m_x100 = 0;
+	      }
 
 
-      /* ========================================
-         Send telemetry over UART
-         ======================================== */
+	      /* ========================================
+	         Read REAL battery voltage using ADC
+	         ======================================== */
 
-      HAL_UART_Transmit(
-          &huart2,
-          (uint8_t *)telemetry_message,
-          (uint16_t)message_length,
-          HAL_MAX_DELAY
-      );
+	      HAL_ADC_Start(&hadc1);
+
+	      if (HAL_ADC_PollForConversion(
+	              &hadc1,
+	              100) == HAL_OK)
+	      {
+	          adc_raw = HAL_ADC_GetValue(&hadc1);
+
+	          battery_mv =
+	              ((uint64_t)adc_raw * 3300U * 133U) /
+	              (4095U * 33U);
+	      }
+
+	      HAL_ADC_Stop(&hadc1);
 
 
-      /* Send one complete packet every second */
-      HAL_Delay(1000);
-  }
+	      /* ========================================
+	         Determine complete system status
+	         ======================================== */
+
+	      uint8_t low_battery =
+	          (battery_mv < 7000U);
+
+	      const char *system_status;
+
+	      if (low_battery && !imu_ok && !bmp390_ok)
+	      {
+	          system_status = "LOW_BATT_IMU_BMP_FAULT";
+	      }
+	      else if (low_battery && !imu_ok)
+	      {
+	          system_status = "LOW_BATT_IMU_FAULT";
+	      }
+	      else if (low_battery && !bmp390_ok)
+	      {
+	          system_status = "LOW_BATT_BMP_FAULT";
+	      }
+	      else if (!imu_ok && !bmp390_ok)
+	      {
+	          system_status = "IMU_BMP_FAULT";
+	      }
+	      else if (!imu_ok)
+	      {
+	          system_status = "IMU_FAULT";
+	      }
+	      else if (!bmp390_ok)
+	      {
+	          system_status = "BMP_FAULT";
+	      }
+	      else if (low_battery)
+	      {
+	          system_status = "LOW_BATTERY";
+	      }
+	      else
+	      {
+	          system_status = "OK";
+	      }
+
+
+	      /* ========================================
+	         Create complete telemetry packet
+	         ======================================== */
+
+	      int message_length = snprintf(
+	          telemetry_message,
+	          sizeof(telemetry_message),
+	          "TIME_MS=%lu,"
+	          "BATTERY_MV=%lu,"
+	          "STATUS=%s,"
+	          "ACCEL_X_MG=%ld,"
+	          "ACCEL_Y_MG=%ld,"
+	          "ACCEL_Z_MG=%ld,"
+	          "GYRO_X_MDPS=%ld,"
+	          "GYRO_Y_MDPS=%ld,"
+	          "GYRO_Z_MDPS=%ld,"
+	          "TEMP_C_X100=%ld,"
+	          "PRESSURE_PA=%lu,"
+	          "ALTITUDE_M_X100=%ld\r\n",
+	          (unsigned long)HAL_GetTick(),
+	          (unsigned long)battery_mv,
+	          system_status,
+	          (long)accel_x_mg,
+	          (long)accel_y_mg,
+	          (long)accel_z_mg,
+	          (long)gyro_x_mdps,
+	          (long)gyro_y_mdps,
+	          (long)gyro_z_mdps,
+	          (long)bmp_temp_centi_c,
+	          (unsigned long)bmp_pressure_pa,
+	          (long)altitude_m_x100
+	      );
+
+
+	      /* ========================================
+	         Send telemetry over UART
+	         ======================================== */
+
+	      HAL_UART_Transmit(
+	          &huart2,
+	          (uint8_t *)telemetry_message,
+	          (uint16_t)message_length,
+	          HAL_MAX_DELAY
+	      );
+
+
+	      /* One complete telemetry packet per second */
+	      HAL_Delay(1000);
+	  }
+
   /* USER CODE END 3 */
 }
 
