@@ -15,15 +15,24 @@ BAUD_RATE = 115200
 
 
 # ========================================
-# Telemetry format
+# Expected STM32 telemetry format
 # ========================================
 
 """
-Expected STM32 telemetry:
+Example:
 
-TIME_MS=12345,BATTERY_MV=8400,STATUS=OK,
-ACCEL_X_MG=-10,ACCEL_Y_MG=-90,ACCEL_Z_MG=1018,
-GYRO_X_MDPS=35,GYRO_Y_MDPS=70,GYRO_Z_MDPS=-367
+TIME_MS=12345,
+BATTERY_MV=9720,
+STATUS=OK,
+ACCEL_X_MG=-10,
+ACCEL_Y_MG=-90,
+ACCEL_Z_MG=1018,
+GYRO_X_MDPS=35,
+GYRO_Y_MDPS=70,
+GYRO_Z_MDPS=-367,
+TEMP_C_X100=2415,
+PRESSURE_PA=98112,
+ALTITUDE_M_X100=27099
 """
 
 TELEMETRY_PATTERN = re.compile(
@@ -35,12 +44,15 @@ TELEMETRY_PATTERN = re.compile(
     r"ACCEL_Z_MG=(-?\d+),"
     r"GYRO_X_MDPS=(-?\d+),"
     r"GYRO_Y_MDPS=(-?\d+),"
-    r"GYRO_Z_MDPS=(-?\d+)$"
+    r"GYRO_Z_MDPS=(-?\d+),"
+    r"TEMP_C_X100=(-?\d+),"
+    r"PRESSURE_PA=(\d+),"
+    r"ALTITUDE_M_X100=(-?\d+)$"
 )
 
 
 # ========================================
-# Create logs folder
+# Project folders
 # ========================================
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
@@ -50,12 +62,15 @@ LOG_DIRECTORY.mkdir(exist_ok=True)
 
 
 # ========================================
-# Create a new CSV file
+# Create new CSV file
 # ========================================
 
 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-csv_path = LOG_DIRECTORY / f"avionics_log_{timestamp}.csv"
+csv_path = (
+    LOG_DIRECTORY /
+    f"avionics_log_{timestamp}.csv"
+)
 
 
 # ========================================
@@ -80,7 +95,7 @@ print()
 
 
 # ========================================
-# Open CSV file
+# Open CSV
 # ========================================
 
 with open(csv_path, "w", newline="") as csv_file:
@@ -98,14 +113,17 @@ with open(csv_path, "w", newline="") as csv_file:
         "accel_z_mg",
         "gyro_x_mdps",
         "gyro_y_mdps",
-        "gyro_z_mdps"
+        "gyro_z_mdps",
+        "temp_c",
+        "pressure_pa",
+        "altitude_m"
     ])
 
     csv_file.flush()
 
 
     # ========================================
-    # Continuously read STM32 telemetry
+    # Continuously read telemetry
     # ========================================
 
     try:
@@ -122,30 +140,36 @@ with open(csv_path, "w", newline="") as csv_file:
             if not line:
                 continue
 
-            # Show everything received from STM32
+            # Show incoming telemetry
             print(line)
 
 
             # ========================================
-            # Check for valid telemetry packet
+            # Match complete telemetry packet
             # ========================================
 
             match = TELEMETRY_PATTERN.match(line)
 
             if match is None:
-                # Startup messages such as:
-                # "Avionics monitor started"
-                # "LSM6DSOX FOUND"
-                # are intentionally ignored by the CSV logger.
+
+                # Ignore startup messages such as:
+                #
+                # Avionics monitor started
+                # LSM6DSOX FOUND
+                # BMP390 FOUND
+                # BMP390 CONFIG OK
+
                 continue
 
 
             # ========================================
-            # Extract telemetry values
+            # Extract STM32 values
             # ========================================
 
             time_ms = int(match.group(1))
+
             battery_mv = int(match.group(2))
+
             status = match.group(3)
 
             accel_x_mg = int(match.group(4))
@@ -156,9 +180,28 @@ with open(csv_path, "w", newline="") as csv_file:
             gyro_y_mdps = int(match.group(8))
             gyro_z_mdps = int(match.group(9))
 
+            temp_c_x100 = int(match.group(10))
+
+            pressure_pa = int(match.group(11))
+
+            altitude_m_x100 = int(match.group(12))
+
 
             # ========================================
-            # Record computer timestamp
+            # Convert environmental data
+            # ========================================
+
+            temperature_c = (
+                temp_c_x100 / 100.0
+            )
+
+            altitude_m = (
+                altitude_m_x100 / 100.0
+            )
+
+
+            # ========================================
+            # Computer timestamp
             # ========================================
 
             computer_time = datetime.now().isoformat(
@@ -167,7 +210,7 @@ with open(csv_path, "w", newline="") as csv_file:
 
 
             # ========================================
-            # Write one complete telemetry row
+            # Save one complete telemetry snapshot
             # ========================================
 
             csv_writer.writerow([
@@ -180,15 +223,18 @@ with open(csv_path, "w", newline="") as csv_file:
                 accel_z_mg,
                 gyro_x_mdps,
                 gyro_y_mdps,
-                gyro_z_mdps
+                gyro_z_mdps,
+                temperature_c,
+                pressure_pa,
+                altitude_m
             ])
 
-            # Immediately save data to disk
+            # Save immediately to disk
             csv_file.flush()
 
 
     # ========================================
-    # Stop safely with Ctrl+C
+    # Stop safely
     # ========================================
 
     except KeyboardInterrupt:
